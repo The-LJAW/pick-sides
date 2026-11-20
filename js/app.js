@@ -178,9 +178,9 @@ function viewPlay(cat) {
     store.rankings[cat.id] = ranking;
     store.skipped[cat.id] = game.state.skipped;
     save();
-    const pending = read(sessionStorage, PENDING_KEY);
-    write(sessionStorage, PENDING_KEY, null);
-    go(pending && pending.startsWith(`#/vs/${cat.code}/`) ? pending : `#/result/${cat.id}`);
+    // A challenge link stays pending: the result page shows their own type
+    // first, with a button through to the match.
+    go(`#/result/${cat.id}`);
   };
 
   const pickSide = (id, btn, otherBtn) => {
@@ -255,9 +255,20 @@ function viewResult(cat) {
   const drawCard = () => drawRankCard(canvas, { cat, ranking, name: cleanName(store.name), type, take, host: hostLabel() });
   const shareText = () => `I'm a ${type.label}. Rank your ${cat.title} and see how we match:`;
 
+  const pending = read(sessionStorage, PENDING_KEY);
+  let waiting = null;
+  if (typeof pending === 'string' && pending.startsWith(`#/vs/${cat.code}/`)) {
+    let who = 'Your friend';
+    try { who = cleanName(decodeURIComponent(pending.split('/')[4] || '')) || who; } catch { /* keep default */ }
+    waiting = h('section', { class: 'panel waiting stack' },
+      h('h2', {}, `Done! Now, how do you match with ${who}?`),
+      h('a', { class: 'btn', href: pending }, 'See your match'));
+  }
+
   render(
     topbar(h('a', { class: 'linkbtn', href: '#/' }, 'All rankings')),
     h('div', { class: 'stack-lg' },
+      waiting,
       h('section', { class: 'type' },
         h('div', { class: 'emoji' }, type.emoji),
         h('div', { class: 'label' }, `Your ${cat.title} type`),
@@ -303,6 +314,7 @@ function viewVs(cat, theirs, theirName) {
         h('button', { class: 'btn', type: 'button', onclick: () => { write(sessionStorage, PENDING_KEY, location.hash); go(`#/play/${cat.id}`); } }, 'Start ranking')));
   }
 
+  write(sessionStorage, PENDING_KEY, null);
   const enc = encodeRanking(cat, theirs);
   if (enc === encodeRanking(cat, mine) && theirName === (cleanName(store.name) || 'A friend')) {
     return render(

@@ -67,6 +67,36 @@ export const CATEGORIES = [
       oldschool: { label: 'Old-School Soul', emoji: '🌽', line: 'You have the candy taste of a kindly grandparent, and we respect it.' },
     },
   },
+  {
+    id: 'cookies',
+    code: 'c',
+    title: 'Christmas Cookies',
+    emoji: '🍪',
+    badge: 'Coming up',
+    blurb: 'The cookie tin, ranked. Somebody has to defend oatmeal raisin.',
+    theme: { bg: '#F2F7F0', card: '#FFFFFF', accent: '#B91C1C', accent2: '#EF4444', ink: '#14301F' },
+    items: [
+      { id: 'sugar', name: 'Frosted Sugar Cookies', emoji: '❄️', group: 'classic' },
+      { id: 'gingerbread', name: 'Gingerbread', emoji: '🤎', group: 'classic' },
+      { id: 'chocchip', name: 'Chocolate Chip', emoji: '🍪', group: 'choc' },
+      { id: 'snickerdoodle', name: 'Snickerdoodles', emoji: '🟠', group: 'butter' },
+      { id: 'pbblossom', name: 'Peanut Butter Blossoms', emoji: '🥜', group: 'choc' },
+      { id: 'shortbread', name: 'Shortbread', emoji: '🧈', group: 'butter' },
+      { id: 'thumbprint', name: 'Jam Thumbprints', emoji: '🍓', group: 'wild' },
+      { id: 'snowball', name: 'Snowball Cookies', emoji: '⛄', group: 'butter' },
+      { id: 'crinkle', name: 'Chocolate Crinkles', emoji: '🍫', group: 'choc' },
+      { id: 'spritz', name: 'Spritz Cookies', emoji: '🎄', group: 'classic' },
+      { id: 'oatmeal', name: 'Oatmeal Raisin', emoji: '🍇', group: 'wild' },
+      { id: 'macaroon', name: 'Coconut Macaroons', emoji: '🥥', group: 'wild' },
+    ],
+    consensus: ['chocchip', 'sugar', 'pbblossom', 'snickerdoodle', 'gingerbread', 'shortbread', 'crinkle', 'snowball', 'thumbprint', 'spritz', 'macaroon', 'oatmeal'],
+    groups: {
+      classic: { label: 'Cookie-Cutter Classicist', emoji: '🎄', line: 'If it does not come in the shape of a tree, you are not interested.' },
+      choc: { label: 'Chocolate Seeker', emoji: '🍫', line: 'You check every cookie for chocolate before committing.' },
+      butter: { label: 'Butter Believer', emoji: '🧈', line: 'Plain to the untrained eye. You know better.' },
+      wild: { label: 'Cookie Tin Rebel', emoji: '🥥', line: 'You reach for the cookies everyone else leaves behind, on purpose.' },
+    },
+  },
 ];
 
 export const getCategory = (id) => CATEGORIES.find((c) => c.id === id) || null;
