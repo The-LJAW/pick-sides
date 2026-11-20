@@ -1,6 +1,7 @@
 // Pure logic for comparing rankings and describing them. No DOM in here.
 
-import { getItem } from './data.js?v=5';
+import { getItem } from './data.js?v=6';
+import { ITEM_LINES, TYPE_LINES, TAKE_LINES, NORMAL_LINES, CUSTOM_TOP, CUSTOM_LAST } from './roasts.js?v=6';
 
 // ---- Share-link encoding -------------------------------------------------
 // One base-36 character per item (its index in cat.items), best first.
@@ -163,31 +164,46 @@ export function hotTakeText(cat, ranking) {
   return `${getItem(cat, take.above).name} above ${getItem(cat, take.below).name}`;
 }
 
-// Template roast. A real LLM-written roast needs a server; this stands in.
+// Roast built from the hand-written lines in roasts.js: an opener (the hot
+// take, or their #1), a middle line (their type, or their #1), and a closer
+// about their last place pick. The same ranking always gets the same roast.
+function seedOf(text) {
+  let h = 2166136261;
+  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 16777619);
+  return h >>> 0;
+}
+
 export function roast(cat, ranking) {
   if (ranking.length < 2) return '';
-  const type = archetype(cat, ranking);
-  const take = hotTake(cat, ranking);
-  const last = getItem(cat, ranking[ranking.length - 1]).name;
-  const first = getItem(cat, ranking[0]).name;
-  const pick = (options) => options[(ranking[0].length + ranking.length + last.length) % options.length];
+  const seed = seedOf(`${cat.id}|${ranking.join(',')}`);
+  const pick = (options, salt) => options[seedOf(`${seed}:${salt}`) % options.length];
+  const fill = (line, vars) => line.replace(/\{(\w+)\}/g, (_, k) => vars[k]);
 
-  const opener = take
-    ? pick([
-        `${getItem(cat, take.above).name} above ${getItem(cat, take.below).name}? Bold. Wrong, but bold.`,
-        `You put ${getItem(cat, take.above).name} above ${getItem(cat, take.below).name}. Seek help.`,
-        `${getItem(cat, take.above).name} over ${getItem(cat, take.below).name} is a choice people will remember.`,
-      ])
-    : !cat.consensus.length
-      ? `${first} at number one, and you said it with your whole chest.`
-      : pick([
-          `${first} at number one. Suspiciously normal. No hot takes detected.`,
-          `A ranking so sensible it could run for office.`,
-        ]);
-  const closer = pick([
-    `And ${last} dead last? Somebody's feelings are hurt.`,
-    `${last} in last place will be brought up at dinner.`,
-    `Justice for ${last}.`,
-  ]);
-  return [opener, type ? type.line : '', closer].filter(Boolean).join(' ');
+  const firstId = ranking[0];
+  const lastId = ranking[ranking.length - 1];
+  const top = getItem(cat, firstId).name;
+  const last = getItem(cat, lastId).name;
+  const take = hotTake(cat, ranking);
+  const type = archetype(cat, ranking);
+  const topLines = ITEM_LINES[firstId]?.top;
+  const lastLines = ITEM_LINES[lastId]?.last;
+  const typeLines = type ? [type.line, ...(TYPE_LINES[type.key] || [])] : [];
+
+  let opener;
+  let middle = '';
+  if (take) {
+    opener = fill(pick(TAKE_LINES, 'take'), { a: getItem(cat, take.above).name, b: getItem(cat, take.below).name });
+    const topIsInTake = take.above === firstId || take.below === firstId;
+    const useTop = topLines && !topIsInTake && pick([true, false], 'mid');
+    middle = useTop ? pick(topLines, 'top') : typeLines.length ? pick(typeLines, 'type') : '';
+  } else if (topLines) {
+    opener = pick(topLines, 'top');
+    middle = typeLines.length ? pick(typeLines, 'type') : '';
+  } else {
+    opener = fill(pick(cat.consensus.length ? NORMAL_LINES : CUSTOM_TOP, 'normal'), { top });
+    middle = typeLines.length ? pick(typeLines, 'type') : '';
+  }
+  const closer = lastLines ? pick(lastLines, 'last') : fill(pick(CUSTOM_LAST, 'last'), { last });
+
+  return [opener, middle, closer].filter(Boolean).join(' ');
 }

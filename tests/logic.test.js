@@ -155,6 +155,31 @@ test('custom lists: no type, no hot take, still a roast', () => {
   const ranking = ['i2', 'i0', 'i3', 'i1'];
   assert.equal(archetype(cat, ranking), null);
   assert.equal(hotTake(cat, ranking), null);
-  assert.match(roast(cat, ranking), /^C at number one/);
+  assert.match(roast(cat, ranking), /\bC\b/);
+  assert.match(roast(cat, ranking), /\bB\b/, 'names the last place item');
   assert.deepEqual(decodeRanking(cat, encodeRanking(cat, ranking)), ranking);
+});
+
+test('roasts: every item has lines, nothing is left unfilled, and there is lots of variety', async () => {
+  const { ITEM_LINES, TYPE_LINES } = await import('../js/roasts.js');
+  for (const cat of CATEGORIES) {
+    for (const item of cat.items) {
+      assert.equal(ITEM_LINES[item.id]?.top?.length, 3, `${item.id} needs 3 top lines`);
+      assert.equal(ITEM_LINES[item.id]?.last?.length, 3, `${item.id} needs 3 last lines`);
+    }
+    for (const key of Object.keys(cat.groups)) assert.ok(TYPE_LINES[key]?.length, `${key} needs type lines`);
+  }
+  const rng = seeded(11);
+  for (const cat of CATEGORIES) {
+    const ids = cat.items.map((i) => i.id);
+    const seen = new Set();
+    for (let i = 0; i < 3000; i++) {
+      const r = [...ids].sort(() => rng() - 0.5);
+      const text = roast(cat, r);
+      assert.doesNotMatch(text, /[{}]|undefined/, text);
+      assert.equal(text, roast(cat, r), 'same ranking, same roast');
+      seen.add(text);
+    }
+    assert.ok(seen.size > 1500, `${cat.id}: only ${seen.size} different roasts in 3000 rankings`);
+  }
 });

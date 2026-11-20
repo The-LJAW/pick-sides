@@ -1,9 +1,9 @@
-import { CATEGORIES, getCategory, getCategoryByCode, getItem } from './data.js?v=5';
-import { createRanker, currentPair, choose, skip, isDone, result, remaining } from './ranker.js?v=5';
-import { encodeRanking, decodeRanking, similarity, verdict, archetype, hotTakeText, roast, tableSummary } from './match.js?v=5';
-import { drawRankCard, drawMatchCard, canvasToBlob } from './card.js?v=5';
-import { api, online, track } from './api.js?v=5';
-import { CROWD_MIN } from './config.js?v=5';
+import { CATEGORIES, getCategory, getCategoryByCode, getItem } from './data.js?v=6';
+import { createRanker, currentPair, choose, skip, isDone, result, remaining } from './ranker.js?v=6';
+import { encodeRanking, decodeRanking, similarity, verdict, archetype, hotTakeText, roast, tableSummary } from './match.js?v=6';
+import { drawRankCard, drawMatchCard, canvasToBlob } from './card.js?v=6';
+import { api, online, track } from './api.js?v=6';
+import { CROWD_MIN } from './config.js?v=6';
 
 const app = document.getElementById('app');
 const toastEl = document.getElementById('toast');
