@@ -130,3 +130,31 @@ test('archetype and hot take', () => {
   assert.match(roast(cat, spicy), /Candy Corn/);
   assert.equal(roast(cat, ['reeses']), '');
 });
+
+test('table summary: most alike, least alike, odd one out and combined ranking', async () => {
+  const { tableSummary } = await import('../js/match.js');
+  const base = CATEGORIES[0].consensus;
+  const members = [
+    { name: 'Ann', ranking: base },
+    { name: 'Bo', ranking: [base[1], base[0], ...base.slice(2)] },
+    { name: 'Cy', ranking: [...base].reverse() },
+  ];
+  const s = tableSummary(members);
+  assert.equal(s.pairs.length, 3);
+  assert.deepEqual([s.mostAlike.a, s.mostAlike.b], ['Ann', 'Bo']);
+  assert.equal(s.leastAlike.percent, 0);
+  assert.equal(s.outlier.name, 'Cy');
+  assert.equal(s.combined.length, base.length);
+  assert.ok(s.combined.indexOf(base[0]) < s.combined.indexOf(base[11]), 'two against one keeps the favourite on top');
+  assert.equal(tableSummary([members[0]]).mostAlike, null);
+  assert.equal(tableSummary(members.slice(0, 2)).outlier, null);
+});
+
+test('custom lists: no type, no hot take, still a roast', () => {
+  const cat = { items: ['a', 'b', 'c', 'd'].map((n, i) => ({ id: `i${i}`, name: n.toUpperCase(), emoji: '', group: 'all' })), consensus: [], groups: {} };
+  const ranking = ['i2', 'i0', 'i3', 'i1'];
+  assert.equal(archetype(cat, ranking), null);
+  assert.equal(hotTake(cat, ranking), null);
+  assert.match(roast(cat, ranking), /^C at number one/);
+  assert.deepEqual(decodeRanking(cat, encodeRanking(cat, ranking)), ranking);
+});

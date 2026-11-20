@@ -6,6 +6,12 @@
       "runtimeExecutable": "python3",
       "runtimeArgs": ["-m", "http.server", "4173"],
       "port": 4173
+    },
+    {
+      "name": "pick-sides-api",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": ["-c", "cd worker && npx --yes wrangler@4 dev --port 8787"],
+      "port": 8787
     }
   ]
 }

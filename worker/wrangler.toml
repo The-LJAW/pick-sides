@@ -1,0 +1,19 @@
+name = "pick-sides-api"
+main = "src/index.js"
+compatibility_date = "2026-06-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "pick-sides"
+# Replace with the id printed by: npx wrangler d1 create pick-sides
+database_id = "00000000-0000-0000-0000-000000000000"
+
+[vars]
+# Sites allowed to call this API from a browser.
+ALLOWED_ORIGINS = "https://the-ljaw.github.io,http://localhost:4173"
+# Most AI-written roasts per day. Beyond this the app uses its built-in roasts.
+ROAST_DAILY_CAP = "500"
+
+# The AI roast needs a secret that is NOT stored in this file:
+#   npx wrangler secret put ANTHROPIC_API_KEY
+# Without it everything else works and roasts use the built-in templates.

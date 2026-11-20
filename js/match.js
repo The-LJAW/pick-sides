@@ -1,6 +1,6 @@
 // Pure logic for comparing rankings and describing them. No DOM in here.
 
-import { getItem } from './data.js';
+import { getItem } from './data.js?v=4';
 
 // ---- Share-link encoding -------------------------------------------------
 // One base-36 character per item (its index in cat.items), best first.
@@ -93,7 +93,54 @@ export function archetype(cat, ranking) {
     const score = t.sum / t.count;
     if (!best || score > best.score) best = { key, score };
   }
-  return best ? { key: best.key, ...cat.groups[best.key] } : null;
+  return best && cat.groups[best.key] ? { key: best.key, ...cat.groups[best.key] } : null;
+}
+
+// ---- Group tables ----------------------------------------------------------
+// members: [{ name, ranking }]. Finds who is most and least alike, the person
+// least like everyone else, and the group's combined ranking.
+export function tableSummary(members) {
+  const pairs = [];
+  for (let i = 0; i < members.length; i++) {
+    for (let j = i + 1; j < members.length; j++) {
+      const s = similarity(members[i].ranking, members[j].ranking);
+      if (s) pairs.push({ a: members[i].name, b: members[j].name, percent: s.percent });
+    }
+  }
+  const sorted = [...pairs].sort((p, q) => q.percent - p.percent);
+
+  let outlier = null;
+  if (members.length >= 3) {
+    for (const m of members) {
+      const mine = pairs.filter((p) => p.a === m.name || p.b === m.name);
+      if (!mine.length) continue;
+      const average = Math.round(mine.reduce((t, p) => t + p.percent, 0) / mine.length);
+      if (!outlier || average < outlier.average) outlier = { name: m.name, average };
+    }
+  }
+
+  // Average position of each item, counting only items most of the group ranked.
+  const totals = new Map();
+  for (const { ranking } of members) {
+    ranking.forEach((id, pos) => {
+      const t = totals.get(id) || { sum: 0, count: 0 };
+      t.sum += ranking.length > 1 ? pos / (ranking.length - 1) : 0;
+      t.count++;
+      totals.set(id, t);
+    });
+  }
+  const combined = [...totals.entries()]
+    .filter(([, t]) => t.count >= members.length / 2)
+    .sort(([, p], [, q]) => p.sum / p.count - q.sum / q.count)
+    .map(([id]) => id);
+
+  return {
+    pairs,
+    mostAlike: sorted[0] || null,
+    leastAlike: sorted.length > 1 ? sorted[sorted.length - 1] : null,
+    outlier,
+    combined,
+  };
 }
 
 // The pair this person ranks most "backwards" compared with the crowd.
@@ -131,10 +178,12 @@ export function roast(cat, ranking) {
         `You put ${getItem(cat, take.above).name} above ${getItem(cat, take.below).name}. Seek help.`,
         `${getItem(cat, take.above).name} over ${getItem(cat, take.below).name} is a choice people will remember.`,
       ])
-    : pick([
-        `${first} at number one. Suspiciously normal. No hot takes detected.`,
-        `A ranking so sensible it could run for office.`,
-      ]);
+    : !cat.consensus.length
+      ? `${first} at number one, and you said it with your whole chest.`
+      : pick([
+          `${first} at number one. Suspiciously normal. No hot takes detected.`,
+          `A ranking so sensible it could run for office.`,
+        ]);
   const closer = pick([
     `And ${last} dead last? Somebody's feelings are hurt.`,
     `${last} in last place will be brought up at dinner.`,
