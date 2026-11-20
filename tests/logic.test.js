@@ -33,6 +33,8 @@ test('data: every category is internally consistent', () => {
     for (const item of cat.items) assert.ok(cat.groups[item.group], `${item.id} has unknown group`);
   }
   assert.equal(new Set(CATEGORIES.map((c) => c.code)).size, CATEGORIES.length);
+  const typeKeys = CATEGORIES.flatMap((c) => Object.keys(c.groups));
+  assert.equal(new Set(typeKeys).size, typeKeys.length, 'type names must differ between categories, or their roast lines get mixed up');
 });
 
 test('ranker: recovers the true order within the tap budget', () => {

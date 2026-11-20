@@ -483,6 +483,10 @@ export const TYPE_LINES = {
     'You like the candy everyone else trades away, which makes trading easy.',
     'Your bucket at the end of the night looks like your grandparents\' candy dish.',
   ],
+  chocolate: [
+    'You inspect every cookie for chocolate before taking a bite.',
+    'A cookie without chocolate is just a cracker with ambition, to you.',
+  ],
   classic: [
     'You like a cookie that looks like a decoration first and a snack second.',
     'You want cookies that look like they came out of a holiday movie.',
