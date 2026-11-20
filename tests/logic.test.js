@@ -1,0 +1,132 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+
+import { CATEGORIES } from '../js/data.js';
+import { createRanker, currentPair, choose, skip, isDone, result, remaining } from '../js/ranker.js';
+import { encodeRanking, decodeRanking, similarity, archetype, hotTake, roast } from '../js/match.js';
+
+// Deterministic random numbers so failures are repeatable.
+function seeded(seed) {
+  let s = seed;
+  return () => ((s = (s * 1664525 + 1013904223) % 4294967296) / 4294967296);
+}
+
+// Answer every matchup according to a known "true" order.
+function play(ids, truth, rng, onStep) {
+  const rank = new Map(truth.map((id, i) => [id, i]));
+  const s = createRanker(ids, rng);
+  while (!isDone(s)) {
+    const [a, b] = currentPair(s);
+    const before = remaining(s);
+    choose(s, rank.get(a) < rank.get(b) ? a : b);
+    onStep?.(s, before);
+  }
+  return s;
+}
+
+test('data: every category is internally consistent', () => {
+  for (const cat of CATEGORIES) {
+    const ids = cat.items.map((i) => i.id);
+    assert.equal(new Set(ids).size, ids.length, `${cat.id} has duplicate item ids`);
+    assert.ok(ids.length <= 36, 'share links use one base-36 character per item');
+    assert.deepEqual([...cat.consensus].sort(), [...ids].sort(), `${cat.id} consensus must list every item once`);
+    for (const item of cat.items) assert.ok(cat.groups[item.group], `${item.id} has unknown group`);
+  }
+  assert.equal(new Set(CATEGORIES.map((c) => c.code)).size, CATEGORIES.length);
+});
+
+test('ranker: recovers the true order within the tap budget', () => {
+  const ids = CATEGORIES[0].items.map((i) => i.id);
+  for (let seed = 1; seed <= 200; seed++) {
+    const rng = seeded(seed);
+    const truth = [...ids].sort(() => rng() - 0.5);
+    const s = play(ids, truth, rng, (state, before) => {
+      assert.ok(remaining(state) < before, 'worst-case remaining must shrink every tap');
+    });
+    assert.deepEqual(result(s), truth);
+    assert.ok(s.taps <= 33, `took ${s.taps} taps`);
+  }
+});
+
+test('ranker: skipping removes an item and still finishes correctly', () => {
+  const ids = CATEGORIES[1].items.map((i) => i.id);
+  for (let seed = 1; seed <= 100; seed++) {
+    const rng = seeded(seed);
+    const truth = [...ids].sort(() => rng() - 0.5);
+    const rank = new Map(truth.map((id, i) => [id, i]));
+    const s = createRanker(ids, rng);
+    const toSkip = new Set([truth[2], truth[7], truth[11]]);
+    while (!isDone(s)) {
+      const [a, b] = currentPair(s);
+      const hit = [a, b].find((id) => toSkip.has(id) && rng() < 0.5);
+      if (hit) skip(s, hit);
+      else choose(s, rank.get(a) < rank.get(b) ? a : b);
+    }
+    for (const id of toSkip) if (result(s).includes(id)) skip(s, id);
+    assert.deepEqual(result(s), truth.filter((id) => !toSkip.has(id)));
+  }
+});
+
+test('ranker: skipping everything but one item ends cleanly', () => {
+  const s = createRanker(['a', 'b', 'c']);
+  while (!isDone(s)) skip(s, currentPair(s)[0]);
+  assert.equal(result(s).length, 1);
+});
+
+test('share links: encode and decode round-trip, bad input is rejected', () => {
+  const cat = CATEGORIES[0];
+  const ranking = [...cat.consensus];
+  const enc = encodeRanking(cat, ranking);
+  assert.equal(enc.length, ranking.length);
+  assert.deepEqual(decodeRanking(cat, enc), ranking);
+  assert.deepEqual(decodeRanking(cat, enc.slice(0, 5)), ranking.slice(0, 5));
+  assert.equal(decodeRanking(cat, '00'), null, 'duplicates');
+  assert.equal(decodeRanking(cat, 'z'), null, 'out of range');
+  assert.equal(decodeRanking(cat, '<script>'), null);
+  assert.equal(decodeRanking(cat, ''), null);
+});
+
+test('similarity: identical is 100, reversed is 0, and it is symmetric', () => {
+  const a = CATEGORIES[0].consensus;
+  assert.equal(similarity(a, a).percent, 100);
+  assert.equal(similarity(a, [...a].reverse()).percent, 0);
+  const rng = seeded(7);
+  for (let i = 0; i < 100; i++) {
+    const b = [...a].sort(() => rng() - 0.5);
+    const ab = similarity(a, b).percent;
+    assert.equal(ab, similarity(b, a).percent);
+    assert.ok(ab >= 0 && ab <= 100);
+  }
+});
+
+test('similarity: top and bottom disagreements cost more than middle ones', () => {
+  const a = CATEGORIES[0].consensus;
+  const swap = (i, j) => { const b = [...a]; [b[i], b[j]] = [b[j], b[i]]; return b; };
+  assert.ok(similarity(a, swap(0, 1)).percent < similarity(a, swap(5, 6)).percent);
+});
+
+test('similarity: only shared items count, and too little overlap gives null', () => {
+  const a = ['turkey', 'stuffing', 'mashed', 'gravy'];
+  assert.equal(similarity(a, ['corn', 'turkey', 'stuffing', 'mashed', 'gravy', 'pie'].filter((x) => x !== 'corn' && x !== 'pie')).percent, 100);
+  assert.equal(similarity(a, ['turkey', 'pie', 'stuffing', 'corn', 'mashed', 'gravy']).percent, 100);
+  assert.equal(similarity(a, ['turkey', 'stuffing', 'corn']), null);
+});
+
+test('similarity: shared favourite and biggest clash are reported', () => {
+  const a = CATEGORIES[0].consensus;
+  const b = [a[0], ...a.slice(2), a[1]];
+  const r = similarity(a, b);
+  assert.equal(r.love, a[0]);
+  assert.deepEqual(r.clash, { id: a[1], a: 2, b: 12 });
+});
+
+test('archetype and hot take', () => {
+  const cat = CATEGORIES[1];
+  assert.equal(archetype(cat, cat.consensus).key, 'choc');
+  assert.equal(hotTake(cat, cat.consensus), null);
+  const spicy = ['candycorn', ...cat.consensus.filter((id) => id !== 'candycorn')];
+  assert.deepEqual(hotTake(cat, spicy), { above: 'candycorn', below: 'reeses', gap: 11 });
+  assert.equal(archetype(cat, ['candycorn', 'tootsie', 'reeses', 'snickers']).key, 'oldschool');
+  assert.match(roast(cat, spicy), /Candy Corn/);
+  assert.equal(roast(cat, ['reeses']), '');
+});
