@@ -2,7 +2,7 @@
 // to { error, status } when the server says no, or to null when it is
 // unreachable or switched off, so the app always keeps working without it.
 
-import { API } from './config.js?v=4';
+import { API } from './config.js?v=5';
 
 export const online = !!API;
 

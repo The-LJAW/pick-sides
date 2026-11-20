@@ -1,6 +1,6 @@
 // Pure logic for comparing rankings and describing them. No DOM in here.
 
-import { getItem } from './data.js?v=4';
+import { getItem } from './data.js?v=5';
 
 // ---- Share-link encoding -------------------------------------------------
 // One base-36 character per item (its index in cat.items), best first.
