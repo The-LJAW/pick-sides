@@ -84,3 +84,58 @@ export function remaining(s) {
   }
   return total;
 }
+
+// ---- Draft: a full ranking in far fewer taps --------------------------------
+// One tap on a grid says more than one this-or-that. Players alternate picking
+// their favourite and their worst from what is left, which fixes both ends of
+// the ranking first. The last few items are settled head-to-head.
+// 12 items take 8 grid taps + at most 5 duels = 13 taps, for an exact order.
+
+export const DUEL_SIZE = 4;
+
+function settleDraft(s, rng) {
+  if (!s.duel && s.pool.length <= DUEL_SIZE) {
+    s.duel = createRanker(s.pool, rng);
+    s.pool = [];
+  }
+  return s;
+}
+
+export function createDraft(ids, rng = Math.random) {
+  return settleDraft({ v: 2, pool: shuffle(ids, rng), best: [], worst: [], turn: 'best', duel: null, taps: 0, skipped: [] }, rng);
+}
+
+export const draftDone = (s) => !!s.duel && isDone(s.duel);
+
+export function draftStep(s) {
+  if (draftDone(s)) return null;
+  if (s.duel) return { kind: 'duel', pair: currentPair(s.duel) };
+  return { kind: 'pick', mode: s.turn, options: s.pool };
+}
+
+export function draftChoose(s, id, rng = Math.random) {
+  if (draftDone(s)) throw new Error('ranking is already finished');
+  if (s.duel) {
+    choose(s.duel, id);
+  } else {
+    if (!s.pool.includes(id)) throw new Error(`${id} is not on the board`);
+    s.pool = s.pool.filter((x) => x !== id);
+    (s.turn === 'best' ? s.best : s.worst).push(id);
+    s.turn = s.turn === 'best' ? 'worst' : 'best';
+  }
+  s.taps++;
+  return settleDraft(s, rng);
+}
+
+// "Never tried it": drop the item from the ranking entirely.
+export function draftSkip(s, id, rng = Math.random) {
+  if (s.duel) skip(s.duel, id);
+  else s.pool = s.pool.filter((x) => x !== id);
+  if (!s.skipped.includes(id)) s.skipped.push(id);
+  return settleDraft(s, rng);
+}
+
+export const draftResult = (s) => (draftDone(s) ? [...s.best, ...result(s.duel), ...[...s.worst].reverse()] : null);
+
+// Most taps still needed. Used for the progress bar.
+export const draftRemaining = (s) => (s.duel ? remaining(s.duel) : s.pool.length - DUEL_SIZE + 5);

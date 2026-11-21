@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { CATEGORIES } from '../js/data.js';
-import { createRanker, currentPair, choose, skip, isDone, result, remaining } from '../js/ranker.js';
+import { createRanker, currentPair, choose, skip, isDone, result, remaining, createDraft, draftStep, draftChoose, draftSkip, draftDone, draftResult, draftRemaining } from '../js/ranker.js';
 import { encodeRanking, decodeRanking, similarity, archetype, hotTake, roast } from '../js/match.js';
 
 // Deterministic random numbers so failures are repeatable.
@@ -184,4 +184,63 @@ test('roasts: every item has lines, nothing is left unfilled, and there is lots 
     }
     assert.ok(seen.size > 1500, `${cat.id}: only ${seen.size} different roasts in 3000 rankings`);
   }
+});
+
+function answerDraft(s, rank) {
+  const step = draftStep(s);
+  const options = step.kind === 'duel' ? step.pair : step.options;
+  const sorted = [...options].sort((a, b) => rank.get(a) - rank.get(b));
+  return step.kind === 'pick' && step.mode === 'worst' ? sorted[sorted.length - 1] : sorted[0];
+}
+
+test('draft: exact ranking of 12 items in 13 taps or fewer', () => {
+  for (const cat of CATEGORIES) {
+    const ids = cat.items.map((i) => i.id);
+    for (let seed = 1; seed <= 300; seed++) {
+      const rng = seeded(seed);
+      const truth = [...ids].sort(() => rng() - 0.5);
+      const rank = new Map(truth.map((id, i) => [id, i]));
+      const s = createDraft(ids, rng);
+      assert.equal(draftRemaining(s), 13);
+      while (!draftDone(s)) {
+        const before = draftRemaining(s);
+        draftChoose(s, answerDraft(s, rank), rng);
+        assert.ok(draftRemaining(s) < before);
+      }
+      assert.deepEqual(draftResult(s), truth);
+      assert.ok(s.taps <= 13, `took ${s.taps} taps`);
+    }
+  }
+});
+
+test('draft: never-tried items drop out at any stage, and saved games resume', () => {
+  const ids = CATEGORIES[1].items.map((i) => i.id);
+  for (let seed = 1; seed <= 200; seed++) {
+    const rng = seeded(seed);
+    const truth = [...ids].sort(() => rng() - 0.5);
+    const rank = new Map(truth.map((id, i) => [id, i]));
+    const drop = new Set([truth[1], truth[6], truth[10]]);
+    let s = createDraft(ids, rng);
+    while (!draftDone(s)) {
+      const step = draftStep(s);
+      const options = step.kind === 'duel' ? step.pair : step.options;
+      const hit = options.find((id) => drop.has(id) && rng() < 0.4);
+      if (hit) draftSkip(s, hit, rng);
+      else if (step.kind === 'pick' && options.some((id) => drop.has(id))) {
+        const clean = options.filter((id) => !drop.has(id));
+        if (clean.length) draftChoose(s, [...clean].sort((a, b) => (rank.get(a) - rank.get(b)) * (step.mode === 'worst' ? -1 : 1))[0], rng);
+        else draftSkip(s, options[0], rng);
+      } else if (step.kind === 'duel' && options.some((id) => drop.has(id))) draftSkip(s, options.find((id) => drop.has(id)), rng);
+      else draftChoose(s, answerDraft(s, rank), rng);
+      s = JSON.parse(JSON.stringify(s));
+    }
+    const left = draftResult(s).filter((id) => drop.has(id));
+    assert.deepEqual(left, []);
+    assert.equal(draftResult(s).length + s.skipped.length, ids.length);
+  }
+});
+
+test('draft: short lists go straight to head-to-head', () => {
+  const s = createDraft(['a', 'b', 'c', 'd']);
+  assert.equal(draftStep(s).kind, 'duel');
 });
