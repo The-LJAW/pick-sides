@@ -1,9 +1,9 @@
-import { CATEGORIES, getCategory, getCategoryByCode, getItem } from './data.js?v=9';
-import { createRanker, currentPair, choose, skip, isDone, result, remaining, MAX_TAPS } from './ranker.js?v=9';
-import { encodeRanking, decodeRanking, similarity, verdict, archetype, hotTakeText, roast, tableSummary } from './match.js?v=9';
-import { drawRankCard, drawMatchCard, canvasToBlob } from './card.js?v=9';
-import { api, online, track } from './api.js?v=9';
-import { CROWD_MIN } from './config.js?v=9';
+import { CATEGORIES, getCategory, getCategoryByCode, getItem } from './data.js?v=10';
+import { createRanker, currentPair, choose, skip, isDone, result, remaining, canExtend, extend, lockedEnds, BONUS_TAPS } from './ranker.js?v=10';
+import { encodeRanking, decodeRanking, similarity, verdict, archetype, hotTakeText, roast, tableSummary } from './match.js?v=10';
+import { drawRankCard, drawMatchCard, canvasToBlob } from './card.js?v=10';
+import { api, online, track } from './api.js?v=10';
+import { CROWD_MIN } from './config.js?v=10';
 
 const app = document.getElementById('app');
 const toastEl = document.getElementById('toast');
@@ -49,6 +49,7 @@ const store = {
   lists: {},      // custom list id -> { title, items }
   tables: {},     // table id -> { cat, title, name }
   roasts: {},     // "cat:enc" -> AI roast text
+  states: {},     // category id -> finished game, kept for the bonus round
   ...(read(localStorage, KEY) || {}),
 };
 if (!store.mid) store.mid = randomId();
@@ -293,8 +294,9 @@ function viewPlay(cat) {
     store.rankings[cat.id] = ranking;
     store.skipped[cat.id] = game.state.skipped;
     store.rids[cat.id] ||= randomId();
+    store.states[cat.id] = game.state;
     save();
-    track('finish', cat.id);
+    if (!game.state.extended) track('finish', cat.id);
     api.saveRanking(store.rids[cat.id], cat.id, encodeRanking(cat, ranking));
     crowdCache.delete(cat.id);
     // A challenge or table link stays pending: the result page shows their
@@ -331,7 +333,7 @@ function viewPlay(cat) {
       h('div', { class: 'progress', role: 'progressbar', 'aria-valuenow': pct, 'aria-valuemin': 0, 'aria-valuemax': 100 },
         h('div', { style: `width:${pct}%` })),
       h('div', { class: 'prompt' },
-        h('h1', {}, 'Which do you want more?'),
+        h('h1', {}, game.state.extended ? 'Bonus round: which one?' : 'Which do you want more?'),
         h('p', { class: 'muted small' }, cat.title)),
       h('div', { class: 'duel' }, [a, b].map((item, i) => h('div', { class: 'side' },
         buttons[i],
@@ -382,6 +384,15 @@ async function startTable(cat) {
   go(`#/table/${made.id}`);
 }
 
+function accuracyNote(state) {
+  if (!state) return null;
+  const ends = lockedEnds(state);
+  const text = ends.first && ends.last ? 'Your #1 and last place are locked in. The middle is our best read from your picks.'
+    : ends.first ? 'Your #1 is locked in. The rest is our best read from your picks.'
+    : 'Our best read from your picks.';
+  return h('p', { class: 'muted small', style: 'margin-top:12px' }, text);
+}
+
 function viewResult(cat) {
   const ranking = store.rankings[cat.id];
   if (!ranking) return go(`#/play/${cat.id}`);
@@ -391,6 +402,7 @@ function viewResult(cat) {
   const enc = encodeRanking(cat, ranking);
   const skipped = (store.skipped[cat.id] || []).map((id) => getItem(cat, id)?.name).filter(Boolean);
   const fact = crowdFact(cat, ranking);
+  const saved = store.states[cat.id];
 
   const canvas = h('canvas', { 'aria-label': 'Your shareable ranking card' });
   const drawCard = () => drawRankCard(canvas, { cat, ranking, name: myName(), type, take, host: hostLabel() });
@@ -429,8 +441,16 @@ function viewResult(cat) {
           return h('li', { class: i < 3 ? 'top' : '' },
             h('span', { class: 'n' }, i + 1), h('span', { class: 'emoji' }, item.emoji), h('span', {}, item.name));
         })),
-        h('p', { class: 'muted small', style: 'margin-top:12px' }, cat.items.length <= MAX_TAPS ? 'Your #1 is locked in. The rest is our best read from your 12 picks.' : 'Our best read from your 12 picks.'),
+        accuracyNote(saved),
         skipped.length ? h('p', { class: 'muted small', style: 'margin-top:12px' }, `Never tried: ${skipped.join(', ')}`) : null),
+      saved && canExtend(saved) && h('section', { class: 'panel stack center' },
+        h('h2', {}, 'Want it sharper?'),
+        h('p', { class: 'muted' }, cat.items.length <= 12 ? `${BONUS_TAPS} more quick picks to lock in your last place and tighten the rest.` : `${BONUS_TAPS} more quick picks to tighten your ranking.`),
+        h('button', { class: 'btn secondary', type: 'button', onclick: () => {
+          const state = extend(JSON.parse(JSON.stringify(saved)));
+          write(sessionStorage, GAME_KEY, { catId: cat.id, state, history: [] });
+          go(`#/play/${cat.id}`);
+        } }, `Play ${BONUS_TAPS} more`)),
       h('section', { class: 'stack' },
         h('h2', {}, 'Now find out who matches you'),
         h('p', { class: 'muted' }, 'Send your link. They rank theirs, then you both see your match score.'),
@@ -446,7 +466,7 @@ function viewResult(cat) {
         h('button', { class: 'btn secondary', type: 'button', onclick: () => startTable(cat) }, 'Start a table')),
       matchList(cat),
       h('div', { class: 'center' },
-        h('a', { class: 'linkbtn', href: `#/play/${cat.id}` }, 'Redo this ranking'),
+        h('a', { class: 'linkbtn', href: `#/play/${cat.id}`, onclick: () => write(sessionStorage, GAME_KEY, null) }, 'Redo this ranking'),
         ' · ',
         h('a', { class: 'linkbtn', href: '#/' }, 'Rank something else'))));
   drawCard();

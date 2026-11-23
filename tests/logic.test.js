@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { CATEGORIES } from '../js/data.js';
-import { createRanker, currentPair, choose, skip, isDone, result, remaining, MAX_TAPS } from '../js/ranker.js';
+import { createRanker, currentPair, choose, skip, isDone, result, remaining, MAX_TAPS, BONUS_TAPS, canExtend, extend, lockedEnds } from '../js/ranker.js';
 import { encodeRanking, decodeRanking, similarity, archetype, hotTake, roast } from '../js/match.js';
 
 // Deterministic random numbers so failures are repeatable.
@@ -71,7 +71,8 @@ test('ranker: long custom lists still stop at 12 taps', () => {
   assert.equal(result(s).length, 24);
 });
 
-test('ranker: never-tried items drop out, cost no taps, and saved games resume', () => {
+test('ranker: never-tried items drop out, keep the true #1, and saved games resume', () => {
+  let maxTaps = 0;
   const cat = CATEGORIES[1];
   const ids = cat.items.map((i) => i.id);
   for (let seed = 1; seed <= 100; seed++) {
@@ -88,10 +89,11 @@ test('ranker: never-tried items drop out, cost no taps, and saved games resume',
       s = JSON.parse(JSON.stringify(s));
     }
     const out = result(s);
-    assert.ok(s.taps <= 12);
+    maxTaps = Math.max(maxTaps, s.taps);
     assert.ok(out.every((id) => !drop.has(id)));
     assert.equal(out[0], truth.find((id) => !drop.has(id)), 'true favourite of what they have tried');
   }
+  assert.ok(maxTaps <= 15, `took ${maxTaps} taps`);
 });
 
 test('ranker: skipping everything but one item ends cleanly', () => {
@@ -210,4 +212,35 @@ test('roasts: every item has lines, nothing is left unfilled, and there is lots 
     }
     assert.ok(seen.size > 1500, `${cat.id}: only ${seen.size} different roasts in 3000 rankings`);
   }
+});
+
+test('bonus round: 5 more taps lock in both #1 and last place', () => {
+  for (const cat of CATEGORIES) {
+    const ids = cat.items.map((i) => i.id);
+    for (let seed = 1; seed <= 150; seed++) {
+      const rng = seeded(seed);
+      const truth = [...ids].sort(() => rng() - 0.5);
+      const rank = new Map(truth.map((id, i) => [id, i]));
+      let s = play(cat, truth, rng);
+      assert.ok(canExtend(s));
+      s = extend(JSON.parse(JSON.stringify(s)), rng);
+      assert.equal(remaining(s), BONUS_TAPS);
+      while (!isDone(s)) {
+        const [a, b] = currentPair(s);
+        choose(s, rank.get(a) < rank.get(b) ? a : b, rng);
+      }
+      const out = result(s);
+      assert.equal(s.taps, MAX_TAPS + BONUS_TAPS);
+      assert.equal(out[0], truth[0]);
+      assert.equal(out[11], truth[11]);
+      assert.deepEqual(lockedEnds(s), { first: true, last: true });
+      for (const [w, l] of s.games) assert.ok(out.indexOf(w) < out.indexOf(l));
+      assert.equal(canExtend(s), false, 'offered only once');
+    }
+  }
+});
+
+test('bonus round: not offered when the order is already certain', () => {
+  const cat = { items: ['a', 'b', 'c'].map((id) => ({ id, group: 'all' })), consensus: [] };
+  assert.equal(canExtend(play(cat, ['b', 'a', 'c'], seeded(1))), false);
 });

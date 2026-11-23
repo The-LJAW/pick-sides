@@ -11,6 +11,7 @@
 // The state is plain JSON, so the app can snapshot it for undo and persist it.
 
 export const MAX_TAPS = 12;
+export const BONUS_TAPS = 5; // optional round after the results
 
 // Tuned by simulating players; see the ranker tests.
 const PRIOR_WEIGHT = 0.6;
@@ -108,10 +109,15 @@ function nextPair(s, rng) {
     return null;
   };
 
+  // Order of business: everyone plays once, find the champion, find last
+  // place, then find the runner-up among those who lost only to the champion.
+  const undefeated = s.ids.filter((id) => losses[id] === 0); // includes anyone yet to play
+  const champion = undefeated.length === 1 ? undefeated[0] : null;
   const groups = [
     s.ids.filter((id) => plays(id) === 0),
-    s.ids.filter((id) => plays(id) > 0 && losses[id] === 0),
+    undefeated,
     s.ids.filter((id) => plays(id) > 0 && wins[id] === 0),
+    champion ? s.ids.filter((id) => losses[id] === 1 && s.games.some(([w, l]) => w === champion && l === id)) : [],
   ];
   for (const list of groups) {
     if (list.length < 2) continue;
@@ -178,12 +184,17 @@ export function skip(s, id, rng = Math.random) {
   s.ids = s.ids.filter((x) => x !== id);
   s.games = s.games.filter(([w, l]) => w !== id && l !== id);
   if (!s.skipped.includes(id)) s.skipped.push(id);
+  // Dropping an item can undo a knockout result. Allow just enough extra duels
+  // to still find the true #1.
+  if (s.ids.length <= MAX_TAPS) {
+    const lost = new Set(s.games.map(([, l]) => l));
+    const contenders = s.ids.filter((x) => !lost.has(x)).length;
+    s.budget = Math.max(s.budget, s.taps + contenders - 1);
+  }
   return advance(s, rng);
 }
 
-// Most taps still needed. Used for the progress bar.
-export function remaining(s) {
-  if (!s.pair) return 0;
+function unknownPairs(s) {
   const { beats, index } = knownWins(s);
   let unknown = 0;
   for (let i = 0; i < s.ids.length; i++) {
@@ -192,5 +203,30 @@ export function remaining(s) {
       if (!beats[a][b] && !beats[b][a]) unknown++;
     }
   }
-  return Math.min(s.budget - s.taps, unknown);
+  return unknown;
+}
+
+// Most taps still needed. Used for the progress bar.
+export const remaining = (s) => (s.pair ? Math.min(s.budget - s.taps, unknownPairs(s)) : 0);
+
+// The optional bonus round, offered once on a finished ranking.
+export const canExtend = (s) => isDone(s) && !s.extended && unknownPairs(s) > 0;
+
+export function extend(s, rng = Math.random) {
+  if (!canExtend(s)) throw new Error('this ranking cannot be extended');
+  s.budget += BONUS_TAPS;
+  s.extended = true;
+  return advance(s, rng);
+}
+
+// Whether the answers alone prove the first and last places.
+export function lockedEnds(s) {
+  const out = estimate(s);
+  const { beats, index } = knownWins(s);
+  const first = index.get(out[0]);
+  const last = index.get(out[out.length - 1]);
+  return {
+    first: out.every((id) => id === out[0] || beats[first][index.get(id)]),
+    last: out.every((id) => id === out[out.length - 1] || beats[index.get(id)][last]),
+  };
 }
