@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { CATEGORIES } from '../js/data.js';
-import { createRanker, currentPair, choose, skip, isDone, result, remaining, createDraft, draftStep, draftChoose, draftSkip, draftDone, draftResult, draftRemaining } from '../js/ranker.js';
+import { createRanker, currentPair, choose, skip, isDone, result, remaining, MAX_TAPS } from '../js/ranker.js';
 import { encodeRanking, decodeRanking, similarity, archetype, hotTake, roast } from '../js/match.js';
 
 // Deterministic random numbers so failures are repeatable.
@@ -12,13 +12,13 @@ function seeded(seed) {
 }
 
 // Answer every matchup according to a known "true" order.
-function play(ids, truth, rng, onStep) {
+function play(cat, truth, rng, onStep) {
   const rank = new Map(truth.map((id, i) => [id, i]));
-  const s = createRanker(ids, rng);
+  const s = createRanker(cat, rng);
   while (!isDone(s)) {
     const [a, b] = currentPair(s);
     const before = remaining(s);
-    choose(s, rank.get(a) < rank.get(b) ? a : b);
+    choose(s, rank.get(a) < rank.get(b) ? a : b, rng);
     onStep?.(s, before);
   }
   return s;
@@ -37,40 +37,66 @@ test('data: every category is internally consistent', () => {
   assert.equal(new Set(typeKeys).size, typeKeys.length, 'type names must differ between categories, or their roast lines get mixed up');
 });
 
-test('ranker: recovers the true order within the tap budget', () => {
-  const ids = CATEGORIES[0].items.map((i) => i.id);
-  for (let seed = 1; seed <= 200; seed++) {
-    const rng = seeded(seed);
-    const truth = [...ids].sort(() => rng() - 0.5);
-    const s = play(ids, truth, rng, (state, before) => {
-      assert.ok(remaining(state) < before, 'worst-case remaining must shrink every tap');
-    });
-    assert.deepEqual(result(s), truth);
-    assert.ok(s.taps <= 33, `took ${s.taps} taps`);
+test('ranker: 12 taps always finds the true #1 and never contradicts an answer', () => {
+  for (const cat of CATEGORIES) {
+    const ids = cat.items.map((i) => i.id);
+    for (let seed = 1; seed <= 150; seed++) {
+      const rng = seeded(seed);
+      const truth = [...ids].sort(() => rng() - 0.5);
+      const s = play(cat, truth, rng, (state, before) => assert.ok(remaining(state) < before));
+      const out = result(s);
+      assert.equal(s.taps, MAX_TAPS);
+      assert.equal(MAX_TAPS, 12);
+      assert.equal(out[0], truth[0], 'true favourite must be #1');
+      assert.deepEqual([...out].sort(), [...ids].sort());
+      for (const [w, l] of s.games) assert.ok(out.indexOf(w) < out.indexOf(l), `${w} beat ${l}`);
+    }
   }
 });
 
-test('ranker: skipping removes an item and still finishes correctly', () => {
-  const ids = CATEGORIES[1].items.map((i) => i.id);
+test('ranker: short lists are ranked exactly', () => {
+  const cat = { items: ['a', 'b', 'c', 'd', 'e'].map((id) => ({ id, group: 'all' })), consensus: [] };
+  for (let seed = 1; seed <= 100; seed++) {
+    const rng = seeded(seed);
+    const truth = cat.items.map((i) => i.id).sort(() => rng() - 0.5);
+    assert.deepEqual(result(play(cat, truth, rng)), truth);
+  }
+});
+
+test('ranker: long custom lists still stop at 12 taps', () => {
+  const items = Array.from({ length: 24 }, (_, i) => ({ id: `i${i}`, group: 'all' }));
+  const rng = seeded(3);
+  const s = play({ items, consensus: [] }, items.map((i) => i.id).sort(() => rng() - 0.5), rng);
+  assert.equal(s.taps, 12);
+  assert.equal(result(s).length, 24);
+});
+
+test('ranker: never-tried items drop out, cost no taps, and saved games resume', () => {
+  const cat = CATEGORIES[1];
+  const ids = cat.items.map((i) => i.id);
   for (let seed = 1; seed <= 100; seed++) {
     const rng = seeded(seed);
     const truth = [...ids].sort(() => rng() - 0.5);
     const rank = new Map(truth.map((id, i) => [id, i]));
-    const s = createRanker(ids, rng);
-    const toSkip = new Set([truth[2], truth[7], truth[11]]);
+    const drop = new Set([truth[0], truth[6], truth[10]]);
+    let s = createRanker(cat, rng);
     while (!isDone(s)) {
-      const [a, b] = currentPair(s);
-      const hit = [a, b].find((id) => toSkip.has(id) && rng() < 0.5);
-      if (hit) skip(s, hit);
-      else choose(s, rank.get(a) < rank.get(b) ? a : b);
+      const pair = currentPair(s);
+      const hit = pair.find((id) => drop.has(id));
+      if (hit) skip(s, hit, rng);
+      else choose(s, rank.get(pair[0]) < rank.get(pair[1]) ? pair[0] : pair[1], rng);
+      s = JSON.parse(JSON.stringify(s));
     }
-    for (const id of toSkip) if (result(s).includes(id)) skip(s, id);
-    assert.deepEqual(result(s), truth.filter((id) => !toSkip.has(id)));
+    const out = result(s);
+    assert.ok(s.taps <= 12);
+    assert.ok(out.every((id) => !drop.has(id)));
+    assert.equal(out[0], truth.find((id) => !drop.has(id)), 'true favourite of what they have tried');
   }
 });
 
 test('ranker: skipping everything but one item ends cleanly', () => {
-  const s = createRanker(['a', 'b', 'c']);
+  const cat = { items: ['a', 'b', 'c'].map((id) => ({ id, group: 'all' })), consensus: [] };
+  const s = createRanker(cat);
   while (!isDone(s)) skip(s, currentPair(s)[0]);
   assert.equal(result(s).length, 1);
 });
@@ -184,63 +210,4 @@ test('roasts: every item has lines, nothing is left unfilled, and there is lots 
     }
     assert.ok(seen.size > 1500, `${cat.id}: only ${seen.size} different roasts in 3000 rankings`);
   }
-});
-
-function answerDraft(s, rank) {
-  const step = draftStep(s);
-  const options = step.kind === 'duel' ? step.pair : step.options;
-  const sorted = [...options].sort((a, b) => rank.get(a) - rank.get(b));
-  return step.kind === 'pick' && step.mode === 'worst' ? sorted[sorted.length - 1] : sorted[0];
-}
-
-test('draft: exact ranking of 12 items in 13 taps or fewer', () => {
-  for (const cat of CATEGORIES) {
-    const ids = cat.items.map((i) => i.id);
-    for (let seed = 1; seed <= 300; seed++) {
-      const rng = seeded(seed);
-      const truth = [...ids].sort(() => rng() - 0.5);
-      const rank = new Map(truth.map((id, i) => [id, i]));
-      const s = createDraft(ids, rng);
-      assert.equal(draftRemaining(s), 13);
-      while (!draftDone(s)) {
-        const before = draftRemaining(s);
-        draftChoose(s, answerDraft(s, rank), rng);
-        assert.ok(draftRemaining(s) < before);
-      }
-      assert.deepEqual(draftResult(s), truth);
-      assert.ok(s.taps <= 13, `took ${s.taps} taps`);
-    }
-  }
-});
-
-test('draft: never-tried items drop out at any stage, and saved games resume', () => {
-  const ids = CATEGORIES[1].items.map((i) => i.id);
-  for (let seed = 1; seed <= 200; seed++) {
-    const rng = seeded(seed);
-    const truth = [...ids].sort(() => rng() - 0.5);
-    const rank = new Map(truth.map((id, i) => [id, i]));
-    const drop = new Set([truth[1], truth[6], truth[10]]);
-    let s = createDraft(ids, rng);
-    while (!draftDone(s)) {
-      const step = draftStep(s);
-      const options = step.kind === 'duel' ? step.pair : step.options;
-      const hit = options.find((id) => drop.has(id) && rng() < 0.4);
-      if (hit) draftSkip(s, hit, rng);
-      else if (step.kind === 'pick' && options.some((id) => drop.has(id))) {
-        const clean = options.filter((id) => !drop.has(id));
-        if (clean.length) draftChoose(s, [...clean].sort((a, b) => (rank.get(a) - rank.get(b)) * (step.mode === 'worst' ? -1 : 1))[0], rng);
-        else draftSkip(s, options[0], rng);
-      } else if (step.kind === 'duel' && options.some((id) => drop.has(id))) draftSkip(s, options.find((id) => drop.has(id)), rng);
-      else draftChoose(s, answerDraft(s, rank), rng);
-      s = JSON.parse(JSON.stringify(s));
-    }
-    const left = draftResult(s).filter((id) => drop.has(id));
-    assert.deepEqual(left, []);
-    assert.equal(draftResult(s).length + s.skipped.length, ids.length);
-  }
-});
-
-test('draft: short lists go straight to head-to-head', () => {
-  const s = createDraft(['a', 'b', 'c', 'd']);
-  assert.equal(draftStep(s).kind, 'duel');
 });

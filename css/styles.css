@@ -115,29 +115,6 @@ h2 { font-size: 21px; font-weight: 800; }
 .side .linkbtn { font-size: 14px; font-weight: 600; color: var(--muted); }
 .game-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 18px; }
 
-/* ---- Draft board ---- */
-.board { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-.tile {
-  min-width: 0; min-height: 92px; padding: 8px 4px;
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
-  background: var(--card); color: var(--ink); border: 3px solid transparent; border-radius: 16px;
-  font: inherit; cursor: pointer; box-shadow: 0 6px 16px -12px color-mix(in srgb, var(--ink) 50%, transparent);
-  transition: transform .12s, border-color .12s, opacity .12s;
-}
-.tile .emoji { font-size: 32px; line-height: 1; }
-.tile .name { font-size: 13px; font-weight: 800; line-height: 1.15; text-align: center; overflow-wrap: anywhere; }
-.tile:active { transform: scale(.95); }
-.tile.picked { border-color: var(--accent); transform: scale(1.05); }
-.board.worst .tile.picked { border-color: var(--ink); opacity: .45; }
-.board.removing .tile { border-style: dashed; border-color: var(--line); }
-@media (hover: hover) { .tile:hover { border-color: color-mix(in srgb, var(--accent) 45%, transparent); } }
-.linkbtn.never { font-size: 14px; font-weight: 600; color: var(--muted); margin-top: 6px; }
-.locked { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 6px; }
-.locked-row { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; min-height: 28px; font-size: 19px; line-height: 1; }
-.locked-label { flex-basis: 100%; font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); margin-bottom: 3px; }
-.locked-row .muted { font-size: 14px; }
-:is(.tile):focus-visible { outline: 3px solid var(--accent2); outline-offset: 3px; }
-
 /* ---- Results ---- */
 .type { text-align: center; }
 .type .emoji { font-size: 64px; line-height: 1; }

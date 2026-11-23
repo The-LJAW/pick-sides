@@ -1,9 +1,9 @@
-import { CATEGORIES, getCategory, getCategoryByCode, getItem } from './data.js?v=8';
-import { createDraft, draftStep, draftChoose, draftSkip, draftDone, draftResult, draftRemaining } from './ranker.js?v=8';
-import { encodeRanking, decodeRanking, similarity, verdict, archetype, hotTakeText, roast, tableSummary } from './match.js?v=8';
-import { drawRankCard, drawMatchCard, canvasToBlob } from './card.js?v=8';
-import { api, online, track } from './api.js?v=8';
-import { CROWD_MIN } from './config.js?v=8';
+import { CATEGORIES, getCategory, getCategoryByCode, getItem } from './data.js?v=9';
+import { createRanker, currentPair, choose, skip, isDone, result, remaining, MAX_TAPS } from './ranker.js?v=9';
+import { encodeRanking, decodeRanking, similarity, verdict, archetype, hotTakeText, roast, tableSummary } from './match.js?v=9';
+import { drawRankCard, drawMatchCard, canvasToBlob } from './card.js?v=9';
+import { api, online, track } from './api.js?v=9';
+import { CROWD_MIN } from './config.js?v=9';
 
 const app = document.getElementById('app');
 const toastEl = document.getElementById('toast');
@@ -246,7 +246,7 @@ function viewHome() {
     h('div', { class: 'stack-lg' },
       h('header', { class: 'hero' },
         h('h1', {}, 'Two options. One tap. Pick a side.'),
-        h('p', {}, 'Rank your favourites in under 15 taps, then find out who matches you and who is completely wrong.')),
+        h('p', {}, 'Rank your favourites in 12 quick taps, then find out who matches you and who is completely wrong.')),
       h('div', { class: 'stack' },
         CATEGORIES.map(categoryCard),
         custom.map(categoryCard),
@@ -269,23 +269,22 @@ function viewHome() {
 function viewPlay(cat) {
   setTheme(cat);
   let game = read(sessionStorage, GAME_KEY);
-  if (!game || game.catId !== cat.id || game.state?.v !== 2 || draftDone(game.state)) {
-    game = { catId: cat.id, state: createDraft(cat.items.map((i) => i.id)), history: [] };
+  if (!game || game.catId !== cat.id || game.state?.v !== 3 || isDone(game.state)) {
+    game = { catId: cat.id, state: createRanker(cat), history: [] };
     track('start', cat.id);
   }
   const persist = () => write(sessionStorage, GAME_KEY, game);
   let busy = false;
-  let removing = false; // "Never tried" mode on the grid
 
   const act = (fn) => {
     game.history.push(JSON.stringify(game.state));
     fn(game.state);
     persist();
-    draftDone(game.state) ? finish() : draw();
+    isDone(game.state) ? finish() : draw();
   };
 
   const finish = () => {
-    const ranking = draftResult(game.state);
+    const ranking = result(game.state);
     write(sessionStorage, GAME_KEY, null);
     if (ranking.length < 3) {
       toast('Rank at least 3 things you have tried.');
@@ -303,11 +302,12 @@ function viewPlay(cat) {
     go(`#/result/${cat.id}`);
   };
 
-  const pickItem = (id, btn) => {
+  const pickSide = (id, btn, otherBtn) => {
     if (busy) return;
     busy = true;
     btn.classList.add('picked');
-    setTimeout(() => { busy = false; act((s) => draftChoose(s, id)); }, 170);
+    otherBtn.classList.add('lost');
+    setTimeout(() => { busy = false; act((s) => choose(s, id)); }, 170);
   };
 
   const undo = () => {
@@ -317,84 +317,34 @@ function viewPlay(cat) {
     draw();
   };
 
-  const footer = (left) => h('div', { class: 'game-foot' },
-    h('button', { class: 'linkbtn', type: 'button', disabled: !game.history.length, onclick: undo }, '← Undo'),
-    h('span', { class: 'muted small' }, left === 1 ? 'Last one!' : `${left} taps left, at most`));
-
-  const header = (left) => {
+  function draw() {
+    const [a, b] = currentPair(game.state).map((id) => getItem(cat, id));
+    const left = remaining(game.state);
     const pct = Math.round((100 * game.state.taps) / (game.state.taps + left));
-    return [
-      topbar(h('a', { class: 'linkbtn', href: '#/' }, 'Quit')),
-      h('div', { class: 'progress', role: 'progressbar', 'aria-valuenow': pct, 'aria-valuemin': 0, 'aria-valuemax': 100 },
-        h('div', { style: `width:${pct}%` })),
-    ];
-  };
-
-  const lockedRow = (label, ids) => h('div', { class: 'locked-row' },
-    h('span', { class: 'locked-label' }, label),
-    ids.length ? ids.map((id) => h('span', { title: getItem(cat, id).name }, getItem(cat, id).emoji)) : h('span', { class: 'muted' }, '–'));
-
-  function drawBoard(step, left) {
-    const worst = step.mode === 'worst';
-    const prompt = removing ? 'Tap anything you have never tried' : worst ? 'Now, the worst one?' : 'Pick your favorite';
-    render(
-      header(left),
-      h('div', { class: 'prompt' },
-        h('h1', {}, prompt),
-        h('p', { class: 'muted small' }, removing ? 'It will be left out of your ranking.' : cat.title)),
-      h('div', { class: `board${worst ? ' worst' : ''}${removing ? ' removing' : ''}` }, step.options.map((id) => {
-        const item = getItem(cat, id);
-        const btn = h('button', { class: 'tile', type: 'button' },
-          h('span', { class: 'emoji' }, item.emoji), h('span', { class: 'name' }, item.name));
-        btn.addEventListener('click', () => {
-          if (removing) act((s) => draftSkip(s, id));
-          else pickItem(id, btn);
-        });
-        return btn;
-      })),
-      h('div', { class: 'center' },
-        h('button', { class: 'linkbtn never', type: 'button', onclick: () => { removing = !removing; draw(); } },
-          removing ? 'Done' : 'Never tried one?')),
-      h('div', { class: 'locked' },
-        lockedRow('Your best', game.state.best),
-        lockedRow('Your worst', game.state.worst)),
-      footer(left));
-  }
-
-  function drawDuel(step, left) {
-    const [a, b] = step.pair.map((id) => getItem(cat, id));
     const buttons = [a, b].map((item) => h('button', { class: 'choice', type: 'button' },
       h('span', { class: 'emoji' }, item.emoji), h('span', { class: 'name' }, item.name)));
-    const pickSide = (id, btn, other) => {
-      if (busy) return;
-      other.classList.add('lost');
-      pickItem(id, btn);
-    };
     buttons[0].addEventListener('click', () => pickSide(a.id, buttons[0], buttons[1]));
     buttons[1].addEventListener('click', () => pickSide(b.id, buttons[1], buttons[0]));
 
     render(
-      header(left),
+      topbar(h('a', { class: 'linkbtn', href: '#/' }, 'Quit')),
+      h('div', { class: 'progress', role: 'progressbar', 'aria-valuenow': pct, 'aria-valuemin': 0, 'aria-valuemax': 100 },
+        h('div', { style: `width:${pct}%` })),
       h('div', { class: 'prompt' },
-        h('h1', {}, 'Final round: which one?'),
+        h('h1', {}, 'Which do you want more?'),
         h('p', { class: 'muted small' }, cat.title)),
       h('div', { class: 'duel' }, [a, b].map((item, i) => h('div', { class: 'side' },
         buttons[i],
-        h('button', { class: 'linkbtn', type: 'button', onclick: () => !busy && act((s) => draftSkip(s, item.id)) }, 'Never tried it')))),
-      footer(left));
+        h('button', { class: 'linkbtn', type: 'button', onclick: () => !busy && act((s) => skip(s, item.id)) }, 'Never tried it')))),
+      h('div', { class: 'game-foot' },
+        h('button', { class: 'linkbtn', type: 'button', disabled: !game.history.length, onclick: undo }, '← Undo'),
+        h('span', { class: 'muted small' }, left === 1 ? 'Last one!' : `${left} taps left`)));
 
     document.onkeydown = (e) => {
       if (e.key === 'ArrowLeft') buttons[0].click();
       else if (e.key === 'ArrowRight') buttons[1].click();
       else if (e.key === 'Backspace') undo();
     };
-  }
-
-  function draw() {
-    const step = draftStep(game.state);
-    const left = draftRemaining(game.state);
-    if (step.kind === 'duel') { removing = false; drawDuel(step, left); }
-    else drawBoard(step, left);
   }
 
   persist();
@@ -479,6 +429,7 @@ function viewResult(cat) {
           return h('li', { class: i < 3 ? 'top' : '' },
             h('span', { class: 'n' }, i + 1), h('span', { class: 'emoji' }, item.emoji), h('span', {}, item.name));
         })),
+        h('p', { class: 'muted small', style: 'margin-top:12px' }, cat.items.length <= MAX_TAPS ? 'Your #1 is locked in. The rest is our best read from your 12 picks.' : 'Our best read from your 12 picks.'),
         skipped.length ? h('p', { class: 'muted small', style: 'margin-top:12px' }, `Never tried: ${skipped.join(', ')}`) : null),
       h('section', { class: 'stack' },
         h('h2', {}, 'Now find out who matches you'),
@@ -509,7 +460,7 @@ function viewVs(cat, theirs, theirName) {
   if (!mine) {
     track('challenge_open', cat.id);
     return message(cat.emoji, `${theirName} ranked their ${cat.title}.`,
-      'Rank yours to see how well you match. It takes under 15 taps, and their picks stay hidden until you finish.',
+      'Rank yours to see how well you match. It takes 12 quick taps, and their picks stay hidden until you finish.',
       h('button', { class: 'btn', type: 'button', onclick: () => {
         write(sessionStorage, PENDING_KEY, { hash: location.hash, cat: cat.id, kind: 'vs', who: theirName });
         go(`#/play/${cat.id}`);
