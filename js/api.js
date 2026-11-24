@@ -2,7 +2,7 @@
 // to { error, status } when the server says no, or to null when it is
 // unreachable or switched off, so the app always keeps working without it.
 
-import { API } from './config.js?v=10';
+import { API } from './config.js?v=11';
 
 export const online = !!API;
 
@@ -46,5 +46,7 @@ export const api = {
   createList: (title, items) => call('/api/lists', { title, items }),
   readList: (id) => call(`/api/lists/${id}`),
   roast: (cat, enc) => call('/api/roast', { cat, enc }, 25000),
+  checkout: (id, returnTo) => call(`/api/tables/${id}/checkout`, { returnTo }, 15000),
+  confirm: (id, session) => call(`/api/tables/${id}/confirm`, { session }, 15000),
   stats: () => call('/api/stats'),
 };

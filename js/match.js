@@ -1,7 +1,7 @@
 // Pure logic for comparing rankings and describing them. No DOM in here.
 
-import { getItem } from './data.js?v=10';
-import { ITEM_LINES, TYPE_LINES, TAKE_LINES, NORMAL_LINES, CUSTOM_TOP, CUSTOM_LAST } from './roasts.js?v=10';
+import { getItem } from './data.js?v=11';
+import { ITEM_LINES, TYPE_LINES, TAKE_LINES, NORMAL_LINES, CUSTOM_TOP, CUSTOM_LAST } from './roasts.js?v=11';
 
 // ---- Share-link encoding -------------------------------------------------
 // One base-36 character per item (its index in cat.items), best first.
@@ -206,4 +206,68 @@ export function roast(cat, ranking) {
   const closer = lastLines ? pick(lastLines, 'last') : fill(pick(CUSTOM_LAST, 'last'), { last });
 
   return [opener, middle, closer].filter(Boolean).join(' ');
+}
+
+// ---- Party Pack awards -------------------------------------------------------
+// One award per guest, from their ranking compared with everyone else's.
+// members: [{ name, ranking }]. Returns [{ name, title, line }] in the same order.
+export function awards(cat, members) {
+  if (members.length < 2) return [];
+  const sum = tableSummary(members);
+  const groupPos = new Map(sum.combined.map((id, i) => [id, i]));
+  const given = new Map();
+  const usedItems = new Set();
+  const itemName = (id) => getItem(cat, id)?.name || id;
+
+  const averages = members.map((m) => {
+    const mine = sum.pairs.filter((p) => p.a === m.name || p.b === m.name);
+    return { name: m.name, average: mine.length ? Math.round(mine.reduce((t, p) => t + p.percent, 0) / mine.length) : null };
+  }).filter((a) => a.average != null);
+
+  if (members.length >= 3 && sum.outlier) {
+    given.set(sum.outlier.name, { title: 'The Wild Card', line: `Matches everyone else just ${sum.outlier.average}% on average. Bold.` });
+  }
+  if (members.length >= 3) {
+    const peacemaker = [...averages].sort((a, b) => b.average - a.average).find((a) => !given.has(a.name));
+    if (peacemaker) given.set(peacemaker.name, { title: 'The Peacemaker', line: `Agrees with the table more than anyone: ${peacemaker.average}% on average.` });
+  }
+  const twins = sum.mostAlike;
+  if (twins && twins.percent >= 60 && !given.has(twins.a) && !given.has(twins.b)) {
+    given.set(twins.a, { title: 'Taste Twin', line: `A ${twins.percent}% match with ${twins.b}.` });
+    given.set(twins.b, { title: 'Taste Twin', line: `A ${twins.percent}% match with ${twins.a}.` });
+  }
+
+  // Everyone else: the item they disagree with the table about most. The
+  // strongest disagreements are handed out first, so each item goes to the
+  // person who feels most strongly about it.
+  const describe = (o) => (o.gap > 0
+    ? { title: `Most Likely to Defend ${itemName(o.id)}`, line: `Ranked it #${o.pos + 1}. The table had it at #${o.group + 1}.` }
+    : { title: `Sworn Enemy of ${itemName(o.id)}`, line: `Ranked it #${o.pos + 1}. The table had it at #${o.group + 1}.` });
+  const claims = [];
+  const bestOf = new Map();
+  for (const m of members) {
+    if (given.has(m.name)) continue;
+    const big = Math.max(2, Math.round(m.ranking.length / 6));
+    const options = m.ranking
+      .map((id, pos) => ({ name: m.name, id, pos, group: groupPos.get(id) }))
+      .filter((o) => o.group != null)
+      .map((o) => ({ ...o, gap: o.group - o.pos }))
+      .filter((o) => Math.abs(o.gap) >= big)
+      .sort((x, y) => Math.abs(y.gap) - Math.abs(x.gap));
+    if (options.length) bestOf.set(m.name, options[0]);
+    claims.push(...options);
+  }
+  claims.sort((x, y) => Math.abs(y.gap) - Math.abs(x.gap));
+  for (const c of claims) {
+    if (given.has(c.name) || usedItems.has(c.id)) continue;
+    usedItems.add(c.id);
+    given.set(c.name, describe(c));
+  }
+  for (const m of members) {
+    if (given.has(m.name)) continue;
+    given.set(m.name, bestOf.has(m.name)
+      ? describe(bestOf.get(m.name))
+      : { title: 'The Classicist', line: 'Their ranking is almost exactly the table’s. Reliable.' });
+  }
+  return members.map((m) => ({ name: m.name, ...given.get(m.name) }));
 }

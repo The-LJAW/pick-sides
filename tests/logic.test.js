@@ -244,3 +244,29 @@ test('bonus round: not offered when the order is already certain', () => {
   const cat = { items: ['a', 'b', 'c'].map((id) => ({ id, group: 'all' })), consensus: [] };
   assert.equal(canExtend(play(cat, ['b', 'a', 'c'], seeded(1))), false);
 });
+
+test('party pack awards: every guest gets one, with special titles for the extremes', async () => {
+  const { awards } = await import('../js/match.js');
+  const cat = CATEGORIES[1];
+  const base = cat.consensus;
+  const members = [
+    { name: 'Ann', ranking: base },
+    { name: 'Bo', ranking: [base[1], base[0], ...base.slice(2)] },
+    { name: 'Cy', ranking: [...base].reverse() },
+    { name: 'Di', ranking: ['candycorn', ...base.filter((id) => id !== 'candycorn')] },
+  ];
+  const list = awards(cat, members);
+  assert.deepEqual(list.map((a) => a.name), ['Ann', 'Bo', 'Cy', 'Di']);
+  for (const a of list) assert.ok(a.title && a.line, JSON.stringify(a));
+  assert.equal(list.find((a) => a.name === 'Cy').title, 'The Wild Card');
+  assert.equal(list.find((a) => a.name === 'Di').title, 'Most Likely to Defend Candy Corn');
+  assert.equal(list.filter((a) => a.title === 'The Peacemaker').length, 1);
+  assert.deepEqual(awards(cat, members.slice(0, 1)), []);
+  const rng = seeded(4);
+  for (let t = 0; t < 200; t++) {
+    const group = Array.from({ length: 2 + (t % 9) }, (_, i) => ({ name: `P${i}`, ranking: [...base].sort(() => rng() - 0.5) }));
+    const out = awards(cat, group);
+    assert.equal(out.length, group.length);
+    assert.ok(out.every((a) => a.title && a.line && !/undefined/.test(a.title + a.line)));
+  }
+});

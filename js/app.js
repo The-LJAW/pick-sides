@@ -1,9 +1,9 @@
-import { CATEGORIES, getCategory, getCategoryByCode, getItem } from './data.js?v=10';
-import { createRanker, currentPair, choose, skip, isDone, result, remaining, canExtend, extend, lockedEnds, BONUS_TAPS } from './ranker.js?v=10';
-import { encodeRanking, decodeRanking, similarity, verdict, archetype, hotTakeText, roast, tableSummary } from './match.js?v=10';
-import { drawRankCard, drawMatchCard, canvasToBlob } from './card.js?v=10';
-import { api, online, track } from './api.js?v=10';
-import { CROWD_MIN } from './config.js?v=10';
+import { CATEGORIES, getCategory, getCategoryByCode, getItem } from './data.js?v=11';
+import { createRanker, currentPair, choose, skip, isDone, result, remaining, canExtend, extend, lockedEnds, BONUS_TAPS } from './ranker.js?v=11';
+import { encodeRanking, decodeRanking, similarity, verdict, archetype, hotTakeText, roast, tableSummary, awards } from './match.js?v=11';
+import { drawRankCard, drawMatchCard, canvasToBlob } from './card.js?v=11';
+import { api, online, track } from './api.js?v=11';
+import { CROWD_MIN } from './config.js?v=11';
 
 const app = document.getElementById('app');
 const toastEl = document.getElementById('toast');
@@ -447,6 +447,7 @@ function viewResult(cat) {
         h('h2', {}, 'Want it sharper?'),
         h('p', { class: 'muted' }, cat.items.length <= 12 ? `${BONUS_TAPS} more quick picks to lock in your last place and tighten the rest.` : `${BONUS_TAPS} more quick picks to tighten your ranking.`),
         h('button', { class: 'btn secondary', type: 'button', onclick: () => {
+          track('sharpen', cat.id);
           const state = extend(JSON.parse(JSON.stringify(saved)));
           write(sessionStorage, GAME_KEY, { catId: cat.id, state, history: [] });
           go(`#/play/${cat.id}`);
@@ -592,7 +593,7 @@ async function viewTable(id, stale) {
     const join = async () => {
       if (!needName()) return;
       const joined = await api.joinTable(id, store.mid, myName(), enc);
-      if (joined?.status === 409) return toast(joined.error === 'name taken' ? 'Someone at this table already has that name.' : 'This table is full.');
+      if (joined?.status === 409) return toast(joined.error === 'name taken' ? 'Someone at this table already has that name.' : 'This table is full. The host can make room with the Party Pack.');
       if (!joined || joined.error) return toast('Could not join. Try again in a moment.');
       known.name = myName();
       save();
@@ -650,7 +651,155 @@ async function viewTable(id, stale) {
           const item = getItem(cat, itemId);
           return h('li', { class: i < 3 ? 'top' : '' },
             h('span', { class: 'n' }, i + 1), h('span', { class: 'emoji' }, item.emoji), h('span', {}, item.name));
-        })))));
+        }))),
+      packPanel(id, table, cat, members)));
+}
+
+// ---- Party Pack -------------------------------------------------------------
+const packUnlocked = (table) => table.paid || !table.pack?.available;
+const priceLabel = (table) => `$${((table.pack?.price || 900) / 100).toFixed(2).replace(/\.00$/, '')}`;
+
+async function buyPack(id) {
+  track('pack_checkout');
+  const res = await api.checkout(id, baseUrl());
+  if (res?.url) location.href = res.url;
+  else toast(res?.error === 'already unlocked' ? 'This table already has the Party Pack.' : 'Payments are not available right now. Try again soon.');
+}
+
+function packPanel(id, table, cat, members) {
+  if (members.length < 2) return null;
+  if (!packUnlocked(table)) {
+    track('pack_view', cat.id);
+    return h('section', { class: 'panel stack pack' },
+      h('div', { class: 'label-top' }, 'Party Pack'),
+      h('h2', {}, 'Make it the main event'),
+      h('ul', { class: 'pack-list' },
+        h('li', {}, '📺 A big-screen reveal for the TV, from last place to the table’s #1'),
+        h('li', {}, '🏆 An award for every guest, like “Most Likely to Defend Candy Corn”'),
+        h('li', {}, '🖨️ Printable results for the fridge or the office wall'),
+        h('li', {}, `👥 Room for 60 people. Free tables hold ${table.limit}, and this one has ${members.length}.`)),
+      h('button', { class: 'btn', type: 'button', onclick: () => buyPack(id) }, `Unlock for ${priceLabel(table)}`),
+      h('p', { class: 'muted small center' }, 'One payment for this table, through Stripe. Everyone at the table gets it.'));
+  }
+  const list = awards(cat, members);
+  return h('section', { class: 'panel stack pack' },
+    h('div', { class: 'label-top' }, table.paid ? 'Party Pack · Unlocked' : 'Party Pack · Free preview'),
+    h('h2', {}, 'Make it the main event'),
+    h('a', { class: 'btn', href: `#/table/${id}/show` }, 'Start the big-screen reveal'),
+    h('a', { class: 'btn secondary', href: `#/table/${id}/print` }, 'Printable results'),
+    h('h3', { class: 'awards-title' }, 'Awards'),
+    h('ul', { class: 'facts' }, list.map((a) => h('li', {}, h('b', {}, a.title), `${a.name}: ${a.line}`))));
+}
+
+// Loads a table for the Party Pack pages. Renders a message and returns null on failure.
+async function loadTable(id, stale) {
+  message('⏳', 'Finding the table…');
+  const table = await api.readTable(id);
+  if (stale()) return null;
+  const home = h('a', { class: 'btn', href: '#/' }, 'Home');
+  if (!table || table.error) { message('🤷', 'That table could not be opened.', table ? 'The link may be wrong.' : 'Check your connection and try again.', home); return null; }
+  const cat = await findCategory(table.cat);
+  if (stale()) return null;
+  if (!cat) { message('🤷', 'That table could not be opened.', null, home); return null; }
+  const members = table.members
+    .map((m) => ({ name: m.name, enc: m.enc, ranking: decodeRanking(cat, m.enc) }))
+    .filter((m) => m.ranking);
+  if (!packUnlocked(table) || members.length < 2) { go(`#/table/${id}`); return null; }
+  setTheme(cat);
+  return { table, cat, members, sum: tableSummary(members) };
+}
+
+async function viewShow(id, stale) {
+  const data = await loadTable(id, stale);
+  if (!data) return;
+  const { table, cat, members, sum } = data;
+  track('tv_open', cat.id);
+  const item = (itemId) => getItem(cat, itemId);
+  const ranked = sum.combined;
+  const slides = [{ kicker: cat.title, emoji: cat.emoji, big: table.title, sub: `${members.length} people ranked. Let’s see how you did.` }];
+  if (ranked.length >= 4) {
+    const last = item(ranked[ranked.length - 1]);
+    slides.push({ kicker: 'The table’s last place', emoji: last.emoji, big: last.name, sub: 'Sorry. The table has spoken.' });
+  }
+  const top = ranked.slice(0, 3);
+  const podium = ['And the table’s favorite is…', 'Number 2', 'Number 3'];
+  for (let i = top.length - 1; i >= 0; i--) {
+    const it = item(top[i]);
+    slides.push({ kicker: podium[i], emoji: it.emoji, big: it.name, sub: i === 0 ? 'Number 1. Pass the plate.' : '' });
+  }
+  if (sum.mostAlike) slides.push({ kicker: 'Most alike', emoji: '👯', big: `${sum.mostAlike.a} + ${sum.mostAlike.b}`, sub: `A ${sum.mostAlike.percent}% match` });
+  if (sum.leastAlike) slides.push({ kicker: 'Least alike', emoji: '⚔️', big: `${sum.leastAlike.a} + ${sum.leastAlike.b}`, sub: `Just ${sum.leastAlike.percent}%. Seat them apart.` });
+  for (const a of awards(cat, members)) slides.push({ kicker: a.title, emoji: '🏆', big: a.name, sub: a.line });
+  slides.push({ kicker: 'Your turn', emoji: '📱', big: 'Rank yours and join the table', sub: hostLabel() });
+
+  let at = 0;
+  const stage = h('div', { class: 'show-stage', role: 'region', 'aria-live': 'polite' });
+  const count = h('span', { class: 'show-count' });
+  const draw = () => {
+    const sl = slides[at];
+    stage.replaceChildren(h('div', { class: 'show-slide' },
+      h('div', { class: 'show-kicker' }, sl.kicker),
+      h('div', { class: 'show-emoji' }, sl.emoji),
+      h('div', { class: 'show-big' }, sl.big),
+      sl.sub && h('div', { class: 'show-sub' }, sl.sub)));
+    count.textContent = `${at + 1} / ${slides.length}`;
+  };
+  const move = (d) => { at = Math.max(0, Math.min(slides.length - 1, at + d)); draw(); };
+  const exit = () => { if (document.fullscreenElement) document.exitFullscreen?.(); go(`#/table/${id}`); };
+  stage.addEventListener('click', () => move(1));
+
+  render(h('div', { class: 'show' },
+    stage,
+    h('div', { class: 'show-controls' },
+      h('button', { class: 'linkbtn', type: 'button', onclick: () => move(-1) }, '← Back'),
+      count,
+      h('button', { class: 'linkbtn', type: 'button', onclick: () => document.documentElement.requestFullscreen?.().catch(() => {}) }, 'Full screen'),
+      h('button', { class: 'linkbtn', type: 'button', onclick: exit }, 'Exit'),
+      h('button', { class: 'linkbtn', type: 'button', onclick: () => move(1) }, 'Next →'))));
+  draw();
+  document.onkeydown = (e) => {
+    if (['ArrowRight', ' ', 'Enter', 'PageDown'].includes(e.key)) { e.preventDefault(); move(1); }
+    else if (['ArrowLeft', 'PageUp', 'Backspace'].includes(e.key)) { e.preventDefault(); move(-1); }
+    else if (e.key === 'Escape' && !document.fullscreenElement) exit();
+  };
+}
+
+async function viewPrint(id, stale) {
+  const data = await loadTable(id, stale);
+  if (!data) return;
+  const { table, cat, members, sum } = data;
+  track('print_open', cat.id);
+  const list = awards(cat, members);
+  const small = members.length <= 10;
+  const pct = (a, b) => similarity(a.ranking, b.ranking)?.percent;
+  render(h('div', { class: 'printable stack-lg' },
+    h('div', { class: 'noprint btn-row' },
+      h('a', { class: 'btn secondary', href: `#/table/${id}` }, 'Back'),
+      h('button', { class: 'btn', type: 'button', onclick: () => window.print() }, 'Print')),
+    h('header', { class: 'center' },
+      h('div', { class: 'label-top' }, `${cat.emoji} ${cat.title}`),
+      h('h1', {}, table.title),
+      h('p', { class: 'muted' }, `${members.length} people · ${new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}`)),
+    h('section', {},
+      h('h2', {}, "The table's ranking"),
+      h('ol', { class: 'rank print-cols' }, sum.combined.map((itemId, i) => {
+        const it = getItem(cat, itemId);
+        return h('li', { class: i < 3 ? 'top' : '' }, h('span', { class: 'n' }, i + 1), h('span', { class: 'emoji' }, it.emoji), h('span', {}, it.name));
+      }))),
+    h('section', {},
+      h('h2', {}, 'Awards'),
+      h('ul', { class: 'facts' }, list.map((a) => h('li', {}, h('b', {}, a.title), `${a.name}: ${a.line}`)))),
+    small
+      ? h('section', {},
+          h('h2', {}, 'Who matches whom'),
+          h('div', { class: 'grid-wrap' }, h('table', { class: 'match-grid' },
+            h('tr', {}, h('th', {}, ''), members.map((m) => h('th', {}, m.name))),
+            members.map((a) => h('tr', {}, h('th', {}, a.name), members.map((b) => h('td', {}, a === b ? '–' : `${pct(a, b) ?? '–'}%`)))))))
+      : h('section', {},
+          h('h2', {}, 'Closest matches'),
+          h('ul', { class: 'facts' }, [...sum.pairs].sort((x, y) => y.percent - x.percent).slice(0, 10)
+            .map((p) => h('li', {}, `${p.a} + ${p.b}: ${p.percent}%`)))),
+    h('p', { class: 'muted small center' }, `Made with Pick Sides · ${hostLabel()}`)));
 }
 
 // ---- Make your own list ---------------------------------------------------
@@ -726,6 +875,16 @@ async function viewStats(stale) {
         row('People who joined a table', t.table_join || 0),
         row('Custom lists made', s.lists)),
       h('section', { class: 'panel matches' },
+        h('h2', {}, 'Party Pack'),
+        row('Payments', s.pack?.available ? 'On' : 'Off (free preview)'),
+        row('Seen the offer', t.pack_view || 0),
+        row('Started checkout', t.pack_checkout || 0),
+        row('Paid tables', s.paidTables || 0),
+        row('Revenue (before Stripe fees)', `$${(((s.paidTables || 0) * (s.pack?.price || 900)) / 100).toFixed(2)}`),
+        row('Big-screen reveals opened', t.tv_open || 0),
+        row('Printable pages opened', t.print_open || 0),
+        row('Bonus rounds played', t.sharpen || 0)),
+      h('section', { class: 'panel matches' },
         h('h2', {}, 'Stored rankings by category'),
         s.rankings.length ? s.rankings.map((r) => row(getCategory(r.cat)?.title || (r.cat.startsWith('u-') ? 'A custom list' : r.cat), r.n)) : h('p', { class: 'muted' }, 'None yet.'))));
 }
@@ -739,7 +898,18 @@ async function route() {
 
   if (view === 'new') return viewNew();
   if (view === 'stats') return viewStats(stale);
-  if (view === 'table' && /^[a-z0-9]{6,32}$/.test(a || '')) return viewTable(a, stale);
+  if (view === 'table' && /^[a-z0-9]{6,32}$/.test(a || '')) {
+    if (b === 'show') return viewShow(a, stale);
+    if (b === 'print') return viewPrint(a, stale);
+    if (b === 'paid' && c) {
+      message('⏳', 'Unlocking your Party Pack…');
+      const t = await api.confirm(a, c);
+      if (stale()) return;
+      history.replaceState(null, '', `#/table/${a}`);
+      toast(t?.paid ? 'Party Pack unlocked!' : 'Payment received. If it is not unlocked yet, tap Refresh in a minute.');
+    }
+    return viewTable(a, stale);
+  }
 
   if (view === 'play' || view === 'result' || view === 'vs') {
     let cat = await findCategory(a);

@@ -13,6 +13,14 @@ ALLOWED_ORIGINS = "https://the-ljaw.github.io,http://localhost:4173"
 # Most AI-written roasts per day. Beyond this the app uses its built-in roasts.
 ROAST_DAILY_CAP = "500"
 
+# Party Pack price in cents.
+PARTY_PACK_CENTS = "900"
+
+# The Party Pack needs two Stripe secrets, also NOT stored in this file:
+#   npx wrangler secret put STRIPE_SECRET_KEY
+#   npx wrangler secret put STRIPE_WEBHOOK_SECRET
+# Until STRIPE_SECRET_KEY is set, Party Pack features are free for every table.
+
 # The AI roast needs a secret that is NOT stored in this file:
 #   npx wrangler secret put ANTHROPIC_API_KEY
 # Without it everything else works and roasts use the built-in templates.

@@ -28,3 +28,23 @@ stored roast, and `ROAST_DAILY_CAP` in wrangler.toml limits requests per day.
 ## See the numbers
 
 Open the app at `#/stats`.
+
+## Party Pack payments (Stripe)
+
+Until these are set, every table gets the Party Pack free ("free preview")
+and tables have room for 60. Once STRIPE_SECRET_KEY is set, free tables hold
+8 people and the Party Pack costs PARTY_PACK_CENTS (in wrangler.toml).
+
+1. Create a Stripe account and copy the secret key (use a test key first).
+
+       npx wrangler secret put STRIPE_SECRET_KEY
+
+2. In Stripe, add a webhook endpoint for the event `checkout.session.completed`:
+
+       https://<this server's address>/api/stripe/webhook
+
+   Copy its signing secret:
+
+       npx wrangler secret put STRIPE_WEBHOOK_SECRET
+
+Stripe test card: 4242 4242 4242 4242, any future date, any CVC.
