@@ -1,6 +1,6 @@
 // Draws the shareable images on a canvas (1080x1350, the 4:5 size feeds like).
 
-import { getItem } from './data.js?v=11';
+import { getItem } from './data.js?v=12';
 
 const W = 1080;
 const H = 1350;

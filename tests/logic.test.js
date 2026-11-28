@@ -5,6 +5,8 @@ import { CATEGORIES } from '../js/data.js';
 import { createRanker, currentPair, choose, skip, isDone, result, remaining, MAX_TAPS, BONUS_TAPS, canExtend, extend, lockedEnds } from '../js/ranker.js';
 import { encodeRanking, decodeRanking, similarity, archetype, hotTake, roast } from '../js/match.js';
 
+const byId = (id) => CATEGORIES.find((c) => c.id === id);
+
 // Deterministic random numbers so failures are repeatable.
 function seeded(seed) {
   let s = seed;
@@ -73,7 +75,7 @@ test('ranker: long custom lists still stop at 12 taps', () => {
 
 test('ranker: never-tried items drop out, keep the true #1, and saved games resume', () => {
   let maxTaps = 0;
-  const cat = CATEGORIES[1];
+  const cat = byId('halloween');
   const ids = cat.items.map((i) => i.id);
   for (let seed = 1; seed <= 100; seed++) {
     const rng = seeded(seed);
@@ -104,7 +106,7 @@ test('ranker: skipping everything but one item ends cleanly', () => {
 });
 
 test('share links: encode and decode round-trip, bad input is rejected', () => {
-  const cat = CATEGORIES[0];
+  const cat = byId('thanksgiving');
   const ranking = [...cat.consensus];
   const enc = encodeRanking(cat, ranking);
   assert.equal(enc.length, ranking.length);
@@ -117,7 +119,7 @@ test('share links: encode and decode round-trip, bad input is rejected', () => {
 });
 
 test('similarity: identical is 100, reversed is 0, and it is symmetric', () => {
-  const a = CATEGORIES[0].consensus;
+  const a = byId('thanksgiving').consensus;
   assert.equal(similarity(a, a).percent, 100);
   assert.equal(similarity(a, [...a].reverse()).percent, 0);
   const rng = seeded(7);
@@ -130,7 +132,7 @@ test('similarity: identical is 100, reversed is 0, and it is symmetric', () => {
 });
 
 test('similarity: top and bottom disagreements cost more than middle ones', () => {
-  const a = CATEGORIES[0].consensus;
+  const a = byId('thanksgiving').consensus;
   const swap = (i, j) => { const b = [...a]; [b[i], b[j]] = [b[j], b[i]]; return b; };
   assert.ok(similarity(a, swap(0, 1)).percent < similarity(a, swap(5, 6)).percent);
 });
@@ -143,7 +145,7 @@ test('similarity: only shared items count, and too little overlap gives null', (
 });
 
 test('similarity: shared favourite and biggest clash are reported', () => {
-  const a = CATEGORIES[0].consensus;
+  const a = byId('thanksgiving').consensus;
   const b = [a[0], ...a.slice(2), a[1]];
   const r = similarity(a, b);
   assert.equal(r.love, a[0]);
@@ -151,7 +153,7 @@ test('similarity: shared favourite and biggest clash are reported', () => {
 });
 
 test('archetype and hot take', () => {
-  const cat = CATEGORIES[1];
+  const cat = byId('halloween');
   assert.equal(archetype(cat, cat.consensus).key, 'choc');
   assert.equal(hotTake(cat, cat.consensus), null);
   const spicy = ['candycorn', ...cat.consensus.filter((id) => id !== 'candycorn')];
@@ -163,7 +165,7 @@ test('archetype and hot take', () => {
 
 test('table summary: most alike, least alike, odd one out and combined ranking', async () => {
   const { tableSummary } = await import('../js/match.js');
-  const base = CATEGORIES[0].consensus;
+  const base = byId('thanksgiving').consensus;
   const members = [
     { name: 'Ann', ranking: base },
     { name: 'Bo', ranking: [base[1], base[0], ...base.slice(2)] },
@@ -247,7 +249,7 @@ test('bonus round: not offered when the order is already certain', () => {
 
 test('party pack awards: every guest gets one, with special titles for the extremes', async () => {
   const { awards } = await import('../js/match.js');
-  const cat = CATEGORIES[1];
+  const cat = byId('halloween');
   const base = cat.consensus;
   const members = [
     { name: 'Ann', ranking: base },

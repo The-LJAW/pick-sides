@@ -1,7 +1,7 @@
 // Pure logic for comparing rankings and describing them. No DOM in here.
 
-import { getItem } from './data.js?v=11';
-import { ITEM_LINES, TYPE_LINES, TAKE_LINES, NORMAL_LINES, CUSTOM_TOP, CUSTOM_LAST } from './roasts.js?v=11';
+import { getItem } from './data.js?v=12';
+import { ITEM_LINES, TYPE_LINES, TAKE_LINES, NORMAL_LINES, CUSTOM_TOP, CUSTOM_LAST } from './roasts.js?v=12';
 
 // ---- Share-link encoding -------------------------------------------------
 // One base-36 character per item (its index in cat.items), best first.
